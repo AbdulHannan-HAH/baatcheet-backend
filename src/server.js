@@ -17,7 +17,17 @@ import profileRoutes from './routes/profile.js';
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://baatcheet-frontend-v9mk.vercel.app"
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
+
+
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 connectDB();
@@ -31,7 +41,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/profile', profileRoutes);   // 👈 yeh line add karo
 
 
-const io = initSocket(server, 'http://localhost:5173');
+const io = initSocket(server, allowedOrigins);
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log('Server listening on', PORT));

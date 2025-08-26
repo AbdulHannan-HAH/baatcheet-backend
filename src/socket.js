@@ -29,9 +29,9 @@ function removeOnline(userId, socketId) {
   return false; // still has other connections
 }
 
-export function initSocket(httpServer, corsOrigin) {
+export function initSocket(httpServer, corsOrigins) {
   const io = new Server(httpServer, {
-    cors: { origin: corsOrigin, credentials: true },
+    cors: { origin: corsOrigins, credentials: true },
     cookie: true,
   });
 
