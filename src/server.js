@@ -19,7 +19,8 @@ const server = http.createServer(app);
 
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://baatcheet-frontend-v9mk.vercel.app"
+  "https://baatcheet-frontend-v9mk.vercel.app",
+  "https://baatcheet-beryl.vercel.app"
 ];
 
 app.use(cors({
