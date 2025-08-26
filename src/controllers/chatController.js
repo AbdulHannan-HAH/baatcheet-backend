@@ -78,14 +78,16 @@ export const listMessages = async (req, res) => {
 // NEW: send message via REST (useful as fallback / debugging)
 export const sendMessage = async (req, res) => {
   const from = req.user.uid;
-  const { to, text, voiceUrl, voiceDuration } = req.body;
-  if (!to || (!text && !voiceUrl)) return res.status(400).json({ message: 'Missing fields' });
+  const { to, text, voiceUrl, voiceDuration, attachments } = req.body;
+  if (!to || (!text && !voiceUrl && (!attachments || attachments.length === 0))) {
+    return res.status(400).json({ message: 'Missing fields' });
+  }
 
   const conv = await getOrCreateConversation(from, to);
 
   const msg = await Message.create({
     conversation: conv._id,
-    from, to, text, voiceUrl, voiceDuration,
+    from, to, text, voiceUrl, voiceDuration, attachments,
     deliveredAt: new Date(),
   });
 

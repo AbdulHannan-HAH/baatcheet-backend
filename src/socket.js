@@ -120,7 +120,7 @@ export function initSocket(httpServer, corsOrigins) {
 // In the message:send event handler, modify it to handle replies
 socket.on('message:send', async (payload, ack) => {
   try {
-    const { to, text, voiceUrl, voiceDuration, replyTo } = payload;
+    const { to, text, voiceUrl, voiceDuration, replyTo, attachments } = payload;
     
     // get/create conversation
     let conversation = await Conversation.findOne({
@@ -154,6 +154,7 @@ socket.on('message:send', async (payload, ack) => {
       voiceUrl,
       voiceDuration,
       replyTo: replyData,
+      attachments: attachments || [],
       deliveredAt: new Date(),
     });
     

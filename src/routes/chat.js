@@ -11,6 +11,7 @@ import {
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { uploadFile } from '../utils/cloudinary.js';
 
 const router = express.Router();
 
@@ -45,6 +46,53 @@ router.post('/upload/voice', requireAuth, upload.single('voice'), (req, res) => 
   res.json({ url });
 });
 
+// NEW: File upload endpoint
+router.post('/upload/file', requireAuth, uploadFile.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
 
+    // Get file information
+    const fileInfo = {
+      fileName: req.file.originalname,
+      fileUrl: req.file.path,
+      fileType: getFileType(req.file.mimetype, req.file.originalname),
+      fileSize: req.file.size
+    };
+
+    // If it's an image or video, check for eager transformations (thumbnails)
+    if (req.file.eager && req.file.eager.length > 0) {
+      fileInfo.thumbnailUrl = req.file.eager[0].secure_url;
+    }
+
+    res.json({ file: fileInfo });
+  } catch (error) {
+    console.error('File upload error:', error);
+    res.status(500).json({ error: 'File upload failed' });
+  }
+});
+
+// Improved helper function to determine file type
+function getFileType(mimetype, filename) {
+  const extension = path.extname(filename || '').toLowerCase();
+  
+  if (mimetype.startsWith('image/')) return 'image';
+  if (mimetype.startsWith('video/')) return 'video';
+  if (mimetype.startsWith('audio/')) return 'audio';
+  
+  // Check by extension for better accuracy
+  if (mimetype.includes('pdf') || extension === '.pdf') return 'pdf';
+  if (mimetype.includes('word') || mimetype.includes('document') || 
+      ['.doc', '.docx', '.rtf', '.odt'].includes(extension)) return 'document';
+  if (mimetype.includes('excel') || mimetype.includes('spreadsheet') || 
+      ['.xls', '.xlsx', '.csv'].includes(extension)) return 'spreadsheet';
+  if (mimetype.includes('powerpoint') || mimetype.includes('presentation') || 
+      ['.ppt', '.pptx'].includes(extension)) return 'presentation';
+  if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(extension)) return 'archive';
+  if (['.txt', '.log', '.md'].includes(extension)) return 'text';
+  
+  return 'other';
+}
 
 export default router;

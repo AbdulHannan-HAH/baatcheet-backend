@@ -11,14 +11,21 @@ const MessageSchema = new Schema(
     voiceDuration: { type: Number }, // seconds
     deliveredAt: { type: Date },
     seenAt: { type: Date },
-     replyTo: {
-    messageId: mongoose.Schema.Types.ObjectId,
-    text: String,
-    voiceUrl: String,
-    from: mongoose.Schema.Types.ObjectId,
-    fromName: String
-  }
-    
+    replyTo: {
+      messageId: mongoose.Schema.Types.ObjectId,
+      text: String,
+      voiceUrl: String,
+      from: mongoose.Schema.Types.ObjectId,
+      fromName: String
+    },
+    // NEW: File attachments
+    attachments: [{
+      fileName: String,
+      fileUrl: String,
+      fileType: String, // 'image', 'video', 'document', 'audio', etc.
+      fileSize: Number, // in bytes
+      thumbnailUrl: String // for images/videos
+    }]
   },
   { timestamps: true }
 );
