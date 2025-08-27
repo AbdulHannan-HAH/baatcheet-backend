@@ -77,14 +77,16 @@ export function initSocket(httpServer, corsOrigins) {
           _id: socket.user._id,
           name: socket.user.name,
           email: socket.user.email,
-          avatarUrl: socket.user.avatarUrl
+          avatarUrl: socket.user.avatarUrl,
+          phone: socket.user.phone,
+          bio:socket.user.bio
         }
       });
     }
 
     // Send current online status of ALL users to the newly connected user
     // This is the key fix - we need to get ALL users from database, not just online ones
-    const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen');
+    const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen bio phone');
     
     // Get list of currently online users from our Map
     const onlineUserIds = Array.from(onlineUsers.keys());
@@ -99,7 +101,9 @@ export function initSocket(httpServer, corsOrigins) {
         avatarUrl: user.avatarUrl,
         // Set online status based on our onlineUsers Map, not database
         online: onlineUserIds.includes(user._id.toString()),
-        lastSeen: user.lastSeen
+        lastSeen: user.lastSeen,
+        bio:user.bio,
+        phone:user.phone
       }
     }));
     
