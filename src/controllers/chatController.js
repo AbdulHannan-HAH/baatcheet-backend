@@ -7,7 +7,7 @@ import mongoose from 'mongoose';
 export const listUsers = async (req, res) => {
   const me = req.user.uid;
   const users = await User.find({ _id: { $ne: me } })
-    .select('_id name email avatarUrl lastSeen')
+    .select('_id name email avatarUrl lastSeen bio phone')
     .limit(100)
     .lean();
   res.json({ users });
