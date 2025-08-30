@@ -7,7 +7,6 @@ import User from './models/User.js';
 
 const onlineUsers = new Map(); // userId -> Set<socketId>
 
-
 function addOnline(userId, socketId) {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socketId);
@@ -85,7 +84,6 @@ export function initSocket(httpServer, corsOrigins) {
     }
 
     // Send current online status of ALL users to the newly connected user
-    // This is the key fix - we need to get ALL users from database, not just online ones
     const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen bio phone');
     
     // Get list of currently online users from our Map
@@ -120,67 +118,102 @@ export function initSocket(httpServer, corsOrigins) {
     });
 
     // Send message
-    // In the message:send event handler, change this part:
-// In the message:send event handler, modify it to handle replies
-socket.on('message:send', async (payload, ack) => {
-  try {
-    const { to, text, voiceUrl, voiceDuration, replyTo, attachments } = payload;
-    
-    // get/create conversation
-    let conversation = await Conversation.findOne({
-      participants: { $all: [userId, to] },
-    });
-    if (!conversation) {
-      conversation = await Conversation.create({ participants: [userId, to] });
-    }
-    
-    // If this is a reply, get the original message details
-    let replyData = null;
-    if (replyTo) {
-      const repliedMessage = await Message.findById(replyTo).lean();
-      if (repliedMessage) {
-        replyData = {
-          messageId: repliedMessage._id,
-          text: repliedMessage.text,
-          voiceUrl: repliedMessage.voiceUrl,
-          from: repliedMessage.from,
-          fromName: socket.user.name // Store the sender's name for display
-        };
+    socket.on('message:send', async (payload, ack) => {
+      try {
+        const { to, text, voiceUrl, voiceDuration, replyTo, attachments } = payload;
+        
+        // get/create conversation
+        let conversation = await Conversation.findOne({
+          participants: { $all: [userId, to] },
+        });
+        if (!conversation) {
+          conversation = await Conversation.create({ participants: [userId, to] });
+        }
+        
+        // If this is a reply, get the original message details
+        let replyData = null;
+        if (replyTo) {
+          const repliedMessage = await Message.findById(replyTo).lean();
+          if (repliedMessage) {
+            replyData = {
+              messageId: repliedMessage._id,
+              text: repliedMessage.text,
+              voiceUrl: repliedMessage.voiceUrl,
+              from: repliedMessage.from,
+              fromName: socket.user.name // Store the sender's name for display
+            };
+          }
+        }
+        
+        // create message
+        const msg = await Message.create({
+          conversation: conversation._id,
+          from: userId,
+          to,
+          text,
+          voiceUrl,
+          voiceDuration,
+          replyTo: replyData,
+          attachments: attachments || [],
+          deliveredAt: new Date(),
+        });
+        
+        // update lastMessage
+        conversation.lastMessage = msg._id;
+        await conversation.save();
+
+        const full = await Message.findById(msg._id)
+          .populate('replyTo', 'text voiceUrl from fromName')
+          .lean();
+        
+        // emit to receiver + sender
+        io.to(to).emit('message:new', { message: full });
+        socket.emit('message:sent', { message: full }); // echo for sender ONLY
+
+        // NEW: If recipient is offline, update their unread count in sender's contact list
+        const isRecipientOnline = onlineUsers.has(to);
+        if (!isRecipientOnline) {
+          // Get sender's contact list and update the recipient's unread count
+          const senderContacts = await User.findById(userId).select('contacts');
+          if (senderContacts && senderContacts.contacts) {
+            const contactIndex = senderContacts.contacts.findIndex(
+              contact => contact.userId.toString() === to
+            );
+            
+            if (contactIndex !== -1) {
+              // Update existing contact's unread count
+              senderContacts.contacts[contactIndex].unreadCount = 
+                (senderContacts.contacts[contactIndex].unreadCount || 0) + 1;
+              senderContacts.contacts[contactIndex].lastMessageAt = new Date();
+            } else {
+              // Add new contact with unread count
+              const recipientUser = await User.findById(to).select('name avatarUrl');
+              senderContacts.contacts.push({
+                userId: to,
+                name: recipientUser.name,
+                avatarUrl: recipientUser.avatarUrl,
+                unreadCount: 1,
+                lastMessageAt: new Date()
+              });
+            }
+            
+            await senderContacts.save();
+            
+            // Emit updated contact list to sender
+            socket.emit('contacts:updated', { 
+              contacts: senderContacts.contacts 
+            });
+          }
+        }
+
+        // ack delivered
+        ack && ack({ ok: true, message: full });
+      } catch (e) {
+        console.error('Message send error:', e);
+        ack && ack({ ok: false });
       }
-    }
-    
-    // create message
-    const msg = await Message.create({
-      conversation: conversation._id,
-      from: userId,
-      to,
-      text,
-      voiceUrl,
-      voiceDuration,
-      replyTo: replyData,
-      attachments: attachments || [],
-      deliveredAt: new Date(),
     });
-    
-    // update lastMessage
-    conversation.lastMessage = msg._id;
-    await conversation.save();
 
-    const full = await Message.findById(msg._id)
-      .populate('replyTo', 'text voiceUrl from fromName')
-      .lean();
-    
-    // emit to receiver + sender
-    io.to(to).emit('message:new', { message: full });
-    socket.emit('message:sent', { message: full }); // echo for sender ONLY
-
-    // ack delivered
-    ack && ack({ ok: true, message: full });
-  } catch (e) {
-    console.error('Message send error:', e);
-    ack && ack({ ok: false });
-  }
-});
     // Mark seen
     socket.on('message:seen', async ({ messageId, to }) => {
       const updated = await Message.findByIdAndUpdate(
@@ -191,6 +224,27 @@ socket.on('message:send', async (payload, ack) => {
       if (updated) {
         io.to(to).emit('message:seen', { messageId });
         io.to(socket.user.id).emit('message:seen:echo', { messageId }); // update my copy
+        
+        // Reset unread count for this conversation
+        const message = await Message.findById(messageId);
+        if (message) {
+          const senderContacts = await User.findById(userId).select('contacts');
+          if (senderContacts && senderContacts.contacts) {
+            const contactIndex = senderContacts.contacts.findIndex(
+              contact => contact.userId.toString() === message.from.toString()
+            );
+            
+            if (contactIndex !== -1) {
+              senderContacts.contacts[contactIndex].unreadCount = 0;
+              await senderContacts.save();
+              
+              // Emit updated contact list
+              socket.emit('contacts:updated', { 
+                contacts: senderContacts.contacts 
+              });
+            }
+          }
+        }
       }
     });
 
@@ -221,6 +275,21 @@ socket.on('message:send', async (payload, ack) => {
         });
       } catch (error) {
         console.error('Error fetching users:', error);
+      }
+    });
+
+    // Handle contacts request
+    socket.on('contacts:request', async () => {
+      try {
+        const userWithContacts = await User.findById(userId)
+          .populate('contacts.userId', 'name avatarUrl online lastSeen')
+          .select('contacts');
+        
+        socket.emit('contacts:list', { 
+          contacts: userWithContacts.contacts || [] 
+        });
+      } catch (error) {
+        console.error('Error fetching contacts:', error);
       }
     });
 
