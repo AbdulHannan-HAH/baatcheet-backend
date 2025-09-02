@@ -7,6 +7,7 @@ import User from './models/User.js';
 
 const onlineUsers = new Map(); // userId -> Set<socketId>
 
+
 function addOnline(userId, socketId) {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId).add(socketId);
@@ -78,12 +79,13 @@ export function initSocket(httpServer, corsOrigins) {
           email: socket.user.email,
           avatarUrl: socket.user.avatarUrl,
           phone: socket.user.phone,
-          bio: socket.user.bio
+          bio:socket.user.bio
         }
       });
     }
 
     // Send current online status of ALL users to the newly connected user
+    // This is the key fix - we need to get ALL users from database, not just online ones
     const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen bio phone');
     
     // Get list of currently online users from our Map
@@ -100,8 +102,8 @@ export function initSocket(httpServer, corsOrigins) {
         // Set online status based on our onlineUsers Map, not database
         online: onlineUserIds.includes(user._id.toString()),
         lastSeen: user.lastSeen,
-        bio: user.bio,
-        phone: user.phone
+        bio:user.bio,
+        phone:user.phone
       }
     }));
     
@@ -118,72 +120,67 @@ export function initSocket(httpServer, corsOrigins) {
     });
 
     // Send message
-    socket.on('message:send', async (payload, ack) => {
-      try {
-        const { to, text, voiceUrl, voiceDuration, replyTo, attachments } = payload;
-        
-        // get/create conversation
-        let conversation = await Conversation.findOne({
-          participants: { $all: [userId, to] },
-        });
-        if (!conversation) {
-          conversation = await Conversation.create({ participants: [userId, to] });
-        }
-        
-        // If this is a reply, get the original message details
-        let replyData = null;
-        if (replyTo) {
-          const repliedMessage = await Message.findById(replyTo).lean();
-          if (repliedMessage) {
-            replyData = {
-              messageId: repliedMessage._id,
-              text: repliedMessage.text,
-              voiceUrl: repliedMessage.voiceUrl,
-              from: repliedMessage.from,
-              fromName: socket.user.name // Store the sender's name for display
-            };
-          }
-        }
-        
-        // create message
-        const msg = await Message.create({
-          conversation: conversation._id,
-          from: userId,
-          to,
-          text,
-          voiceUrl,
-          voiceDuration,
-          replyTo: replyData,
-          attachments: attachments || [],
-          deliveredAt: new Date(),
-        });
-        
-        // update lastMessage
-        conversation.lastMessage = msg._id;
-        await conversation.save();
-
-        const full = await Message.findById(msg._id)
-          .populate('from', 'name avatarUrl') // Populate sender info
-          .lean();
-        
-        // Add senderName to the message object
-        const messageWithSender = {
-          ...full,
-          senderName: full.from.name
-        };
-        
-        // emit to receiver + sender
-        io.to(to).emit('message:new', { message: messageWithSender });
-        socket.emit('message:sent', { message: messageWithSender }); // echo for sender ONLY
-
-        // ack delivered
-        ack && ack({ ok: true, message: messageWithSender });
-      } catch (e) {
-        console.error('Message send error:', e);
-        ack && ack({ ok: false });
-      }
+    // In the message:send event handler, change this part:
+// In the message:send event handler, modify it to handle replies
+socket.on('message:send', async (payload, ack) => {
+  try {
+    const { to, text, voiceUrl, voiceDuration, replyTo, attachments } = payload;
+    
+    // get/create conversation
+    let conversation = await Conversation.findOne({
+      participants: { $all: [userId, to] },
     });
+    if (!conversation) {
+      conversation = await Conversation.create({ participants: [userId, to] });
+    }
+    
+    // If this is a reply, get the original message details
+    let replyData = null;
+    if (replyTo) {
+      const repliedMessage = await Message.findById(replyTo).lean();
+      if (repliedMessage) {
+        replyData = {
+          messageId: repliedMessage._id,
+          text: repliedMessage.text,
+          voiceUrl: repliedMessage.voiceUrl,
+          from: repliedMessage.from,
+          fromName: socket.user.name // Store the sender's name for display
+        };
+      }
+    }
+    
+    // create message
+    const msg = await Message.create({
+      conversation: conversation._id,
+      from: userId,
+      to,
+      text,
+      voiceUrl,
+      voiceDuration,
+      replyTo: replyData,
+      attachments: attachments || [],
+      deliveredAt: new Date(),
+    });
+    
+    // update lastMessage
+    conversation.lastMessage = msg._id;
+    await conversation.save();
 
+    const full = await Message.findById(msg._id)
+      .populate('replyTo', 'text voiceUrl from fromName')
+      .lean();
+    
+    // emit to receiver + sender
+    io.to(to).emit('message:new', { message: full });
+    socket.emit('message:sent', { message: full }); // echo for sender ONLY
+
+    // ack delivered
+    ack && ack({ ok: true, message: full });
+  } catch (e) {
+    console.error('Message send error:', e);
+    ack && ack({ ok: false });
+  }
+});
     // Mark seen
     socket.on('message:seen', async ({ messageId, to }) => {
       const updated = await Message.findByIdAndUpdate(
@@ -200,7 +197,7 @@ export function initSocket(httpServer, corsOrigins) {
     // Handle users request
     socket.on('users:request', async () => {
       try {
-        const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen bio phone');
+        const allUsers = await User.find({}, '_id name email avatarUrl online lastSeen');
         
         // Get list of currently online users from our Map
         const onlineUserIds = Array.from(onlineUsers.keys());
@@ -215,9 +212,7 @@ export function initSocket(httpServer, corsOrigins) {
             avatarUrl: user.avatarUrl,
             // Set online status based on our onlineUsers Map, not database
             online: onlineUserIds.includes(user._id.toString()),
-            lastSeen: user.lastSeen,
-            bio: user.bio,
-            phone: user.phone
+            lastSeen: user.lastSeen
           }
         }));
         
